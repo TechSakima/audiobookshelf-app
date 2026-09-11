@@ -909,6 +909,7 @@ export default {
       if (!data.value || isNaN(data.value)) return
       this.currentPlaybackRate = Number(data.value)
       this.updateTimestamp()
+      this.$emit('playbackSpeedChanged', this.currentPlaybackRate)
     },
     async init() {
       await this.loadPlayerSettings()
