@@ -1,6 +1,6 @@
 <template>
   <div>
-    <app-audio-player ref="audioPlayer" :bookmarks="bookmarks" :sleep-timer-running="isSleepTimerRunning" :sleep-time-remaining="sleepTimeRemaining" :serverLibraryItemId="serverLibraryItemId" @selectPlaybackSpeed="showPlaybackSpeedModal = true" @updateTime="(t) => (currentTime = t)" @showSleepTimer="showSleepTimer" @showBookmarks="showBookmarks" />
+    <app-audio-player ref="audioPlayer" :bookmarks="bookmarks" :sleep-timer-running="isSleepTimerRunning" :sleep-time-remaining="sleepTimeRemaining" :serverLibraryItemId="serverLibraryItemId" @selectPlaybackSpeed="showPlaybackSpeedModal = true" @updateTime="(t) => (currentTime = t)" @showSleepTimer="showSleepTimer" @showBookmarks="showBookmarks" @playbackSpeedChanged="changePlaybackSpeed" />
 
     <modals-playback-speed-modal v-model="showPlaybackSpeedModal" :playback-rate.sync="playbackSpeed" @update:playbackRate="updatePlaybackSpeed" @change="changePlaybackSpeed" />
     <modals-sleep-timer-modal v-model="showSleepTimerModal" :current-time="sleepTimeRemaining" :sleep-timer-running="isSleepTimerRunning" :current-end-of-chapter-time="currentEndOfChapterTime" :is-auto="isAutoSleepTimer" @change="selectSleepTimeout" @cancel="cancelSleepTimer" @increase="increaseSleepTimer" @decrease="decreaseSleepTimer" />
@@ -25,6 +25,7 @@ export default {
       showBookmarksModal: false,
       showSleepTimerModal: false,
       playbackSpeed: 1,
+      playbackSpeedLibraryItemId: null,
       currentTime: 0,
       isSleepTimerRunning: false,
       sleepTimerEndTime: 0,
@@ -51,6 +52,15 @@ export default {
     },
     currentPlaybackSession() {
       return this.$store.state.currentPlaybackSession
+    }
+  },
+  watch: {
+    currentPlaybackSession(session) {
+      if (!session) {
+        this.playbackSpeedLibraryItemId = null
+        return
+      }
+      this.applyPlaybackSpeedForLibraryItem(session.localLibraryItem?.id, session.libraryItemId)
     }
   },
   methods: {
@@ -134,6 +144,25 @@ export default {
         }
       }
     },
+    getPlaybackSpeedKey(libraryItemId, serverLibraryItemId) {
+      if (serverLibraryItemId) return serverLibraryItemId
+      if (libraryItemId && !String(libraryItemId).startsWith('local')) return libraryItemId
+      return libraryItemId || null
+    },
+    resolvePlaybackRate(libraryItemId, serverLibraryItemId) {
+      return this.$store.getters['user/getPlaybackRateForLibraryItem'](serverLibraryItemId, libraryItemId)
+    },
+    applyPlaybackSpeedForLibraryItem(libraryItemId, serverLibraryItemId) {
+      const playbackSpeedKey = this.getPlaybackSpeedKey(libraryItemId, serverLibraryItemId)
+      const playbackRate = this.resolvePlaybackRate(libraryItemId, serverLibraryItemId)
+      this.playbackSpeedLibraryItemId = playbackSpeedKey
+      this.playbackSpeed = playbackRate
+      if (this.$refs.audioPlayer && this.$refs.audioPlayer.currentPlaybackRate !== playbackRate) {
+        console.log(`[AudioPlayerContainer] Apply per-book playback speed ${playbackRate} for ${playbackSpeedKey}`)
+        this.$refs.audioPlayer.setPlaybackSpeed(playbackRate)
+      }
+      return playbackRate
+    },
     updatePlaybackSpeed(speed) {
       if (this.$refs.audioPlayer) {
         console.log(`[AudioPlayerContainer] Update Playback Speed: ${speed}`)
@@ -142,12 +171,19 @@ export default {
     },
     changePlaybackSpeed(speed) {
       console.log(`[AudioPlayerContainer] Change Playback Speed: ${speed}`)
-      this.$store.dispatch('user/updateUserSettings', { playbackRate: speed })
+      this.playbackSpeed = speed
+      this.$store.dispatch('user/updatePlaybackRateForLibraryItem', {
+        libraryItemId: this.playbackSpeedLibraryItemId,
+        playbackRate: speed
+      })
     },
     settingsUpdated(settings) {
-      console.log(`[AudioPlayerContainer] Settings Update | PlaybackRate: ${settings.playbackRate}`)
-      this.playbackSpeed = settings.playbackRate
-      if (this.$refs.audioPlayer && this.$refs.audioPlayer.currentPlaybackRate !== settings.playbackRate) {
+      const playbackRate = this.playbackSpeedLibraryItemId
+        ? this.$store.getters['user/getPlaybackRateForLibraryItem'](this.playbackSpeedLibraryItemId)
+        : settings.playbackRate
+      console.log(`[AudioPlayerContainer] Settings Update | PlaybackRate: ${playbackRate}`)
+      this.playbackSpeed = playbackRate
+      if (this.$refs.audioPlayer && this.$refs.audioPlayer.currentPlaybackRate !== playbackRate) {
         console.log(`[AudioPlayerContainer] PlaybackRate Updated: ${this.playbackSpeed}`)
         this.$refs.audioPlayer.setPlaybackSpeed(this.playbackSpeed)
       }
@@ -173,10 +209,7 @@ export default {
       }
     },
     playServerLibraryItemAndCast(libraryItemId, episodeId) {
-      var playbackRate = 1
-      if (this.$refs.audioPlayer) {
-        playbackRate = this.$refs.audioPlayer.currentPlaybackRate || 1
-      }
+      const playbackRate = this.applyPlaybackSpeedForLibraryItem(libraryItemId, libraryItemId)
       AbsAudioPlayer.prepareLibraryItem({ libraryItemId, episodeId, playWhenReady: false, playbackRate })
         .then((data) => {
           if (data.error) {
@@ -240,10 +273,7 @@ export default {
       this.serverLibraryItemId = null
       this.serverEpisodeId = null
 
-      let playbackRate = 1
-      if (this.$refs.audioPlayer) {
-        playbackRate = this.$refs.audioPlayer.currentPlaybackRate || 1
-      }
+      const playbackRate = this.applyPlaybackSpeedForLibraryItem(libraryItemId, serverLibraryItemId)
 
       console.log('Called playLibraryItem', libraryItemId)
       const preparePayload = { libraryItemId, episodeId, playWhenReady: startWhenReady, playbackRate }

@@ -11,6 +11,7 @@ export const state = () => ({
     mobileOrderDesc: true,
     mobileFilterBy: 'all',
     playbackRate: 1,
+    playbackRatesByLibraryItem: {},
     collapseSeries: false,
     collapseBookSeries: false,
     podcastEpisodesOrderBy: 'publishedAt',
@@ -50,6 +51,18 @@ export const getters = {
   getUserSetting: (state) => (key) => {
     return state.settings?.[key] ?? null
   },
+  getPlaybackRateForLibraryItem:
+    (state) =>
+    (...libraryItemIds) => {
+      const rates = state.settings?.playbackRatesByLibraryItem || {}
+      for (const libraryItemId of libraryItemIds) {
+        if (!libraryItemId) continue
+        const rate = Number(rates[libraryItemId])
+        if (!isNaN(rate) && rate > 0) return rate
+      }
+      const fallback = Number(state.settings?.playbackRate)
+      return !isNaN(fallback) && fallback > 0 ? fallback : 1
+    },
   getUserCanUpdate: (state) => {
     return !!state.user?.permissions?.update
   },
@@ -94,6 +107,21 @@ export const actions = {
     if (Object.keys(settingsUpdate).length) {
       dispatch('updateUserSettings', settingsUpdate)
     }
+  },
+  async updatePlaybackRateForLibraryItem({ state, dispatch }, { libraryItemId, playbackRate }) {
+    if (playbackRate === undefined || playbackRate === null || isNaN(playbackRate)) return false
+
+    const rate = Number(playbackRate)
+    const settingsUpdate = { playbackRate: rate }
+
+    if (libraryItemId) {
+      settingsUpdate.playbackRatesByLibraryItem = {
+        ...(state.settings.playbackRatesByLibraryItem || {}),
+        [libraryItemId]: rate
+      }
+    }
+
+    return dispatch('updateUserSettings', settingsUpdate)
   },
   async updateUserSettings({ state, commit }, payload) {
     if (!payload) return false
